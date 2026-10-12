@@ -1,0 +1,161 @@
+name: delivery-service
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: delivery-postgres
+
+    env_file:
+      - ../.env.docker
+
+    ports:
+      - "5437:5432"
+
+    volumes:
+      - delivery-postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: delivery-rabbitmq
+    restart: unless-stopped
+
+    env_file:
+      - ../.env.docker
+
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+    volumes:
+      - delivery-rabbitmq-data:/var/lib/rabbitmq
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "rabbitmq-diagnostics",
+          "-q",
+          "ping"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  mongo:
+    image: mongo:7.0
+    container_name: delivery-mongo
+    restart: unless-stopped
+
+    env_file:
+      - ../.env.docker
+
+    ports:
+      - "27017:27017"
+
+    volumes:
+      - delivery-mongo-data:/data/db
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'db.adminCommand({ping:1}).ok' | grep 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: delivery-redis
+
+    ports:
+      - "6380:6379"
+
+    volumes:
+      - delivery-redis-data:/data
+
+    command: redis-server --appendonly yes
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    container_name: delivery-migrate
+    restart: "no"
+
+    env_file:
+      - ../.env.docker
+
+    volumes:
+      - ../migrations:/migrations:ro
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    entrypoint:
+      - /bin/sh
+      - -ec
+
+    command:
+      - 'exec migrate -path=/migrations -database="$${DATABASE_URL}" up'
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+
+    container_name: delivery-app
+
+    env_file:
+      - ../.env.docker
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://localhost:8080/health"
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  delivery-postgres-data:
+  delivery-redis-data:
+  delivery-mongo-data:
+  delivery-rabbitmq-data:

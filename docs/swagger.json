@@ -1,0 +1,585 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "API для регистрации посылок и расчёта стоимости международной доставки.",
+        "title": "Delivery Service API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "paths": {
+        "/api/v1/admin/calculate-pending": {
+            "post": {
+                "description": "Вручную восстанавливает старые pending через WorkerService и дописывает отсутствующие Mongo-логи готовых расчётов без пересчёта. processed — количество pending. Только DEBUG_MODE=true.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Запустить расчёт вручную",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "integer"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/analytics/daily-sum": {
+            "get": {
+                "description": "Только текущая session cookie. День в UTC, суммы — точные десятичные строки. Пустой день возвращает data: [].",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Сумма доставки за день по типам посылок",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Дата UTC: YYYY-MM-DD",
+                        "name": "date",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.DailySumResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/package-types": {
+            "get": {
+                "description": "Возвращает список доступных типов посылок",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "package-types"
+                ],
+                "summary": "Получить типы посылок",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.packageTypesResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/packages": {
+            "get": {
+                "description": "Возвращает посылки текущей сессии с пагинацией и фильтрацией",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Получить список посылок",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Номер страницы",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Количество элементов",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "ID типа посылки",
+                        "name": "package_type_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Фильтр по наличию рассчитанной стоимости",
+                        "name": "calculated",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.PackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "После 201 registered посылка подтверждённо передана в RabbitMQ. Worker асинхронно рассчитывает её и сохраняет PostgreSQL/MongoDB; GET может временно вернуть 404. session_id cookie изолирует данные пользователя.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Зарегистрировать посылку",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "1..128 printable ASCII: same session/key/normalized request returns same package_id and created_at; changed payload gives 409",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Данные посылки",
+                        "name": "package",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.CreatePackageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.CreatePackageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/packages/{package_id}": {
+            "get": {
+                "description": "Возвращает посылку текущей сессии по package_id",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Получить посылку",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID посылки",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.PackageListItem"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/packages/{package_id}/assign-carrier": {
+            "post": {
+                "description": "Первая попытка выигрывает. Повторное назначение, даже того же carrier_id, возвращает 409. Только текущая session cookie.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Назначить перевозчика",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID посылки",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Положительный carrier_id",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.AssignCarrierRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.AssignCarrierResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Проверяет PostgreSQL, Redis, MongoDB, RabbitMQ и consumer",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Проверить состояние сервиса",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.healthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handler.healthResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "handler.ErrorDetail": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/handler.ErrorDetail"
+                }
+            }
+        },
+        "handler.healthResponse": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.packageTypesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.PackageType"
+                    }
+                }
+            }
+        },
+        "model.AssignCarrierRequest": {
+            "type": "object",
+            "required": [
+                "carrier_id"
+            ],
+            "properties": {
+                "carrier_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.AssignCarrierResponse": {
+            "type": "object",
+            "properties": {
+                "carrier_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.CreatePackageRequest": {
+            "type": "object",
+            "required": [
+                "content_value_usd",
+                "name",
+                "package_type_id",
+                "weight_kg"
+            ],
+            "properties": {
+                "content_value_usd": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_type_id": {
+                    "type": "integer"
+                },
+                "weight_kg": {
+                    "type": "number"
+                }
+            }
+        },
+        "model.CreatePackageResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.DailySumItem": {
+            "type": "object",
+            "properties": {
+                "delivery_cost_rub": {
+                    "type": "string"
+                },
+                "package_count": {
+                    "type": "integer"
+                },
+                "package_type_id": {
+                    "type": "integer"
+                },
+                "package_type_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.DailySumResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.DailySumItem"
+                    }
+                },
+                "date": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.PackageListItem": {
+            "type": "object",
+            "properties": {
+                "carrier_id": {
+                    "type": "integer"
+                },
+                "content_value_usd": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "delivery_cost_rub": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "package_type": {
+                    "$ref": "#/definitions/model.PackageType"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "usd_to_rub_rate": {
+                    "type": "string"
+                },
+                "weight_kg": {
+                    "type": "number"
+                }
+            }
+        },
+        "model.PackageListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.PackageListItem"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/model.Pagination"
+                }
+            }
+        },
+        "model.PackageType": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "name_ru": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.Pagination": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        }
+    }
+}
