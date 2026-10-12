@@ -1,0 +1,392 @@
+definitions:
+  handler.ErrorDetail:
+    properties:
+      code:
+        type: string
+      details:
+        additionalProperties: {}
+        type: object
+      message:
+        type: string
+    type: object
+  handler.ErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/handler.ErrorDetail'
+    type: object
+  handler.healthResponse:
+    properties:
+      checks:
+        additionalProperties:
+          type: string
+        type: object
+      status:
+        type: string
+    type: object
+  handler.packageTypesResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.PackageType'
+        type: array
+    type: object
+  model.AssignCarrierRequest:
+    properties:
+      carrier_id:
+        type: integer
+    required:
+    - carrier_id
+    type: object
+  model.AssignCarrierResponse:
+    properties:
+      carrier_id:
+        type: integer
+    type: object
+  model.CreatePackageRequest:
+    properties:
+      content_value_usd:
+        type: number
+      name:
+        type: string
+      package_type_id:
+        type: integer
+      weight_kg:
+        type: number
+    required:
+    - content_value_usd
+    - name
+    - package_type_id
+    - weight_kg
+    type: object
+  model.CreatePackageResponse:
+    properties:
+      created_at:
+        type: string
+      package_id:
+        type: string
+      status:
+        type: string
+    type: object
+  model.DailySumItem:
+    properties:
+      delivery_cost_rub:
+        type: string
+      package_count:
+        type: integer
+      package_type_id:
+        type: integer
+      package_type_name:
+        type: string
+    type: object
+  model.DailySumResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.DailySumItem'
+        type: array
+      date:
+        type: string
+    type: object
+  model.PackageListItem:
+    properties:
+      carrier_id:
+        type: integer
+      content_value_usd:
+        type: number
+      created_at:
+        type: string
+      delivery_cost_rub:
+        type: number
+      name:
+        type: string
+      package_id:
+        type: string
+      package_type:
+        $ref: '#/definitions/model.PackageType'
+      status:
+        type: string
+      updated_at:
+        type: string
+      usd_to_rub_rate:
+        type: string
+      weight_kg:
+        type: number
+    type: object
+  model.PackageListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.PackageListItem'
+        type: array
+      pagination:
+        $ref: '#/definitions/model.Pagination'
+    type: object
+  model.PackageType:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      name_ru:
+        type: string
+    type: object
+  model.Pagination:
+    properties:
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+info:
+  contact: {}
+  description: API для регистрации посылок и расчёта стоимости международной доставки.
+  title: Delivery Service API
+  version: "1.0"
+paths:
+  /api/v1/admin/calculate-pending:
+    post:
+      description: Вручную восстанавливает старые pending через WorkerService и дописывает
+        отсутствующие Mongo-логи готовых расчётов без пересчёта. processed — количество
+        pending. Только DEBUG_MODE=true.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Запустить расчёт вручную
+      tags:
+      - admin
+  /api/v1/analytics/daily-sum:
+    get:
+      description: 'Только текущая session cookie. День в UTC, суммы — точные десятичные
+        строки. Пустой день возвращает data: [].'
+      parameters:
+      - description: 'Дата UTC: YYYY-MM-DD'
+        in: query
+        name: date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.DailySumResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Сумма доставки за день по типам посылок
+      tags:
+      - analytics
+  /api/v1/package-types:
+    get:
+      description: Возвращает список доступных типов посылок
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.packageTypesResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Получить типы посылок
+      tags:
+      - package-types
+  /api/v1/packages:
+    get:
+      description: Возвращает посылки текущей сессии с пагинацией и фильтрацией
+      parameters:
+      - default: 1
+        description: Номер страницы
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Количество элементов
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      - description: ID типа посылки
+        in: query
+        minimum: 1
+        name: package_type_id
+        type: integer
+      - description: Фильтр по наличию рассчитанной стоимости
+        in: query
+        name: calculated
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.PackageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Получить список посылок
+      tags:
+      - packages
+    post:
+      consumes:
+      - application/json
+      description: После 201 registered посылка подтверждённо передана в RabbitMQ.
+        Worker асинхронно рассчитывает её и сохраняет PostgreSQL/MongoDB; GET может
+        временно вернуть 404. session_id cookie изолирует данные пользователя.
+      parameters:
+      - description: '1..128 printable ASCII: same session/key/normalized request
+          returns same package_id and created_at; changed payload gives 409'
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Данные посылки
+        in: body
+        name: package
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreatePackageRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.CreatePackageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Зарегистрировать посылку
+      tags:
+      - packages
+  /api/v1/packages/{package_id}:
+    get:
+      description: Возвращает посылку текущей сессии по package_id
+      parameters:
+      - description: UUID посылки
+        in: path
+        name: package_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.PackageListItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Получить посылку
+      tags:
+      - packages
+  /api/v1/packages/{package_id}/assign-carrier:
+    post:
+      consumes:
+      - application/json
+      description: Первая попытка выигрывает. Повторное назначение, даже того же carrier_id,
+        возвращает 409. Только текущая session cookie.
+      parameters:
+      - description: UUID посылки
+        in: path
+        name: package_id
+        required: true
+        type: string
+      - description: Положительный carrier_id
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/model.AssignCarrierRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.AssignCarrierResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Назначить перевозчика
+      tags:
+      - packages
+  /health:
+    get:
+      description: Проверяет PostgreSQL, Redis, MongoDB, RabbitMQ и consumer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.healthResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.healthResponse'
+      summary: Проверить состояние сервиса
+      tags:
+      - system
+swagger: "2.0"

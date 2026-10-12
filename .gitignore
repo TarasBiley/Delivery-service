@@ -1,0 +1,5 @@
+.env.local
+.env.docker
+coverage.out
+*.tar.gz
+.DS_Store
